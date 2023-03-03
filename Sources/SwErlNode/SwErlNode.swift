@@ -1,6 +1,10 @@
-public struct SwErlNode {
-    public private(set) var text = "Hello, World!"
+//
+//  SwErlNode.swift
+//
+//
+//  Created by Lee Barney on 3/3/22.
+//
 
-    public init() {
-    }
-}
+import Logging
+
+var logger:Logger? = nil

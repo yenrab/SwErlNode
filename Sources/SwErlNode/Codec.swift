@@ -103,9 +103,6 @@ extension Data {
     }
 }
 
-
-
-
 extension Data {
     var bytes: [Byte] {
         var byteArray = [UInt8](repeating: 0, count: self.count)

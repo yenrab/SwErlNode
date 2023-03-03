@@ -53,20 +53,20 @@ func spawnProcessesFor(EPMD:EPMD) throws{
     //
     // register this node, by name, with the EPMD
     //
-    _ = try spawn(name:"clear_buffer"){(senderPID,trackerId) in
+    _ = try spawn(name:"clear_buffer"){(senderPID,tracker) in
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _context, isDone, error in
             //this code is here for debugging
             //replace it with logging later
             if let data = data, !data.isEmpty {
-                NSLog("\(trackerId): ignoring data for request ")
+                logger?.trace("\(tracker): ignoring data for request ")
             }
             if let error = error {
-                NSLog("\(trackerId): error \(error)")
+                logger?.error("\(tracker): error \(error)")
                 return
             }
             if isDone {
-                NSLog("\(trackerId): EOF")//EPMD terminated
-                stop(client: EPMD)
+                logger?.trace("\(tracker): EOF")//EPMD terminated
+                stop(client: EPMD,trackerID: tracker)
                 return
             }
         }
@@ -79,14 +79,14 @@ func spawnProcessesFor(EPMD:EPMD) throws{
         NSLog("\(tracker): sending register_node request ")
         connection.send(content: protocolData, completion: NWConnection.SendCompletion.contentProcessed { error in
             guard let error = error else{
-                NSLog("\(tracker): sent successfully")
+                logger?.trace("\(tracker): sent successfully")
                 
                 "clear_buffer" ! tracker//sending to next process
                 
                 return
             }
-            NSLog("\(tracker): error \(error) send error")
-            stop(client:EPMD)
+            logger?.error("\(tracker): error \(error) send error")
+            stop(client:EPMD,trackerID: tracker)
         })
     }
     
@@ -94,7 +94,7 @@ func spawnProcessesFor(EPMD:EPMD) throws{
     //store the port and node information for a named remote node
     //
     _ = try spawn(name:"store_port"){(senderPID,message) in
-        let (trackerID,remoteNodeName) = message as! (UUID,String)
+        let (tracker,remoteNodeName) = message as! (UUID,String)
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _context, isDone, error in
             //this code is here for debugging
             //replace it with logging later
@@ -102,10 +102,10 @@ func spawnProcessesFor(EPMD:EPMD) throws{
                 
                 //convert the data to a port number UInt16
                 let responseID = data[0]
-                NSLog("\(trackerID): response identifier is \(responseID) ?? 119")
+                logger?.trace("\(tracker): response identifier is \(responseID) ?? 119")
                 if data.count == 2{//error happened
                     let NPMDError = data[1]
-                    NSLog("\(trackerID): NPMD error \(NPMDError) for \(remoteNodeName)")
+                    logger?.error("\(tracker): NPMD error \(NPMDError) for \(remoteNodeName)")
                     return
                 }
                 
@@ -118,7 +118,7 @@ func spawnProcessesFor(EPMD:EPMD) throws{
                 let nodeName = String(bytes: data[12...12+nameLength], encoding: .utf8)
                 let extrasLength = Int(data[12+nameLength+1...12+nameLength+1+2].toUInt16.toMachineByteOrder)
                 let extras = data[12+nameLength+1+2+1...12+nameLength+1+2+1+extrasLength]
-                NSLog("\(trackerID): peer info converted")
+                logger?.trace("\(tracker): peer info converted")
                 "peerPorts" ! PeerInfo(port: port,nodeType: nodeType,
                                        msgProtocol:msgProtocol,
                                        highestVersion: highestVersion,
@@ -127,12 +127,12 @@ func spawnProcessesFor(EPMD:EPMD) throws{
                                        extras: extras)
             }
             if let error = error {
-                NSLog("\(trackerID): error \(error) for \(remoteNodeName)")
+                logger?.error("\(tracker): error \(error) for \(remoteNodeName)")
                 return
             }
             if isDone {
-                NSLog("\(trackerID): EOF")//EPMD terminated
-                stop(client: EPMD)
+                logger?.trace("\(tracker): EOF")//EPMD terminated
+                stop(client: EPMD,trackerID: tracker)
                 return
             }
         }
@@ -142,17 +142,17 @@ func spawnProcessesFor(EPMD:EPMD) throws{
         
         let protocolData = buildPortPleaseMessageUsing(nodePid: remoteNodeName as! String)
         let tracker = UUID()
-        NSLog("\(tracker): sending port_please request for \(remoteNodeName)")
+        logger?.trace("\(tracker): sending port_please request for \(remoteNodeName)")
         connection.send(content: protocolData, completion: NWConnection.SendCompletion.contentProcessed { error in
             guard let error = error else{
-                NSLog("\(tracker): sent successfully")
+                logger?.trace("\(tracker): sent successfully")
                 
                 "store_port" ! (tracker,remoteNodeName)//sending to next process
                 
                 return
             }
-            NSLog("\(tracker): send error \(error) for \(remoteNodeName)")
-            stop(client:EPMD)
+            logger?.error("\(tracker): send error \(error) for \(remoteNodeName)")
+            stop(client:EPMD,trackerID: tracker)
         })
     }
     
@@ -160,16 +160,16 @@ func spawnProcessesFor(EPMD:EPMD) throws{
     //Get all the registered names
     //
     _ = try spawn(name:"read_names"){(senderPID,message) in
-        let (trackerID,recieverPid) = message as! (UUID,Any)
+        let (tracker,recieverPid) = message as! (UUID,Any)
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _context, isDone, error in
             
             if let data = data, !data.isEmpty {
                 
                 //convert the data to a port number UInt16
                 let dataPort = data[0...3].toUInt32
-                NSLog("\(trackerID): read port is \(dataPort)")
+                logger?.trace("\(tracker): read port is \(dataPort)")
                 guard let endPort = NWEndpoint.Port("\(dataPort)") else{
-                    NSLog("\(trackerID): error \(dataPort) can not be converted to NWEndpoint")
+                    logger?.error("\(tracker): error \(dataPort) can not be converted to NWEndpoint")
                     return
                 }
                 let readConnection = NWConnection(host: host, port: endPort, using: .tcp)
@@ -182,28 +182,28 @@ func spawnProcessesFor(EPMD:EPMD) throws{
                             usableName ! String(data: namesData, encoding: .utf8) as Any
                         }
                         else{
-                            NSLog("\(trackerID): recieverPid  \(recieverPid) is must be either a string or a UUID")
+                            logger?.error("\(tracker): recieverPid  \(recieverPid) is must be either a string or a UUID")
                         }
                     }
                     if let error = error {
-                        NSLog("\(trackerID): error \(error) reading names")
+                        logger?.error("\(tracker): error \(error) reading names")
                         return
                     }
                     if isDone {
-                        NSLog("\(trackerID): EOF")//EPMD terminated
-                        stop(client: EPMD)
+                        logger?.trace("\(tracker): EOF")//EPMD terminated
+                        stop(client: EPMD,trackerID: tracker)
                         return
                     }
                 }
                 
             }
             if let error = error {
-                NSLog("\(trackerID): error \(error) reading names port")
+                logger?.error("\(tracker): error \(error) reading names port")
                 return
             }
             if isDone {
-                NSLog("\(trackerID): EOF")//EPMD terminated
-                stop(client: EPMD)
+                logger?.trace("\(tracker): EOF")//EPMD terminated
+                stop(client: EPMD, trackerID: tracker)
                 return
             }
         }
@@ -216,17 +216,17 @@ func spawnProcessesFor(EPMD:EPMD) throws{
         
         let protocolData = buildNamesMessage()
         let tracker = UUID()
-        NSLog("\(tracker): sending names request")
+        logger?.trace("\(tracker): sending names request")
         connection.send(content: protocolData, completion: NWConnection.SendCompletion.contentProcessed { error in
             guard let error = error else{
-                NSLog("\(tracker): sent successfully")
+                logger?.trace("\(tracker): sent successfully")
                 
                 "read_names" ! (tracker,recieverPid)//sending to next process
                 
                 return
             }
-            NSLog("\(tracker): send error \(error)")
-            stop(client:EPMD)
+            logger?.error("\(tracker): send error \(error)")
+            stop(client:EPMD,trackerID: tracker)
         })
     }
     
@@ -238,17 +238,17 @@ func spawnProcessesFor(EPMD:EPMD) throws{
         
         let protocolData = buildKillMessage()
         let tracker = UUID()
-        NSLog("\(tracker): sending kill request ")
+        logger?.trace("\(tracker): sending kill request ")
         connection.send(content: protocolData, completion: NWConnection.SendCompletion.contentProcessed { error in
             guard let error = error else{
-                NSLog("\(tracker): sent successfully")
+                logger?.trace("\(tracker): sent successfully")
                 
                 "clear_buffer" ! tracker//sending to next process
                 
                 return
             }
-            NSLog("\(tracker): error \(error) send error")
-            stop(client:EPMD)
+            logger?.error("\(tracker): error \(error) send error")
+            stop(client:EPMD,trackerID: tracker)
         })
     }
 }
@@ -300,15 +300,15 @@ func buildKillMessage()->Data{
 
 
 @available(macOS 10.14, *)
-func send(client:EPMD, data:Data, trackingID:UUID) {
-    NSLog("Sending request \(trackingID)")
+func send(client:EPMD, data:Data, trackingID:Any) {
+    logger?.trace("Sending request \(trackingID)")
     client.connection.send(content: data, completion: NWConnection.SendCompletion.contentProcessed { error in
         guard let error = error else{
-            NSLog("request \(trackingID) sent successfully")
+            logger?.trace("request \(trackingID) sent successfully")
             return
         }
-        NSLog("request \(trackingID) got error \(error) when sending request")
-        stop(client:client)
+        logger?.error("request \(trackingID) got error \(error) when sending request")
+        stop(client:client,trackerID: trackingID)
     })
 }
 
@@ -316,7 +316,8 @@ func send(client:EPMD, data:Data, trackingID:UUID) {
 ///This function kills the client connection to the EPMD
 ///server. This causes the EPMD server to unregister the node.
 @available(macOS 10.14, *)
-func stop(client:EPMD) {
+func stop(client:EPMD, trackerID:Any) {
+    logger?.trace("\(trackerID): about to stop")
     client.connection.cancel()
-    NSLog("did stop")
+    logger?.trace("\(trackerID): did stop")
 }
