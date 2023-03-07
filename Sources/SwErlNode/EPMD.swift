@@ -20,6 +20,12 @@ struct PeerInfo {
     let extras:Data
 }
 
+///
+///The peer ports process is a stateful process where
+///the state is a dictionary where the key is the name of
+///the peer and the value is all of the information, including
+///the peer's communication port, sent by the EPMD server
+///
 func startPeerPortsDictionary() throws{
     _ = try spawn(name: "peerPorts", initialState: Dictionary<String,PeerInfo>()){(pid,state,message)in
         let (peerName,port) = message as! (String,UInt16)
@@ -36,7 +42,7 @@ public enum EPMDRequest{
     static let names = "names"
     //static let dump = "dump"//this is for debugging purposes only, therefore it is not implemented in SwErl at this time.
     static let kill = "kill"
-    static let stop = "stop"//this is not used in practice, therefore it is not implemented in SwErl
+    //static let stop = "stop"//this is not used in practice, therefore it is not implemented in SwErl
 }
 @available(macOS 10.14, *)
 public typealias EPMD = (EPMDPort:NWEndpoint.Port,
@@ -46,42 +52,59 @@ public typealias EPMD = (EPMDPort:NWEndpoint.Port,
 
 @available(macOS 10.14, *)
 func spawnProcessesFor(EPMD:EPMD) throws{
-    let (_,host,connection,nodeName) = EPMD
+    let (port,host,connection,nodeName) = EPMD
     //this process is used to consume responses that
     //contain no needed data
     
     //
-    // register this node, by name, with the EPMD
+    // register each node, by name, with the EPMD
     //
-    _ = try spawn(name:"clear_buffer"){(senderPID,tracker) in
+    _ = try spawn(name:"clear_buffer"){(senderPID,message) in
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _context, isDone, error in
-            //this code is here for debugging
-            //replace it with logging later
-            if let data = data, !data.isEmpty {
-                logger?.trace("\(tracker): ignoring data for request ")
+            var ultimateMessage = "fail"
+            if let  (tracker,ultimatePid) = message as? (UUID,UUID){
+                if data != nil {
+                    logger?.trace("\(tracker): data for request was ignored")
+                    ultimateMessage = "ok"
+                }
+                else if isDone {
+                    logger?.trace("\(tracker): EOF")//EPMD terminated
+                    stop(client: EPMD,trackerID: tracker)
+                    ultimateMessage = "EOF"
+                }
+                else if error != nil {
+                    logger?.error("\(tracker): error \(error!)")
+                    ultimateMessage = "fail"
+                }
+                
+                ultimatePid ! (tracker,ultimateMessage)
             }
-            if let error = error {
-                logger?.error("\(tracker): error \(error)")
-                return
+            if let tracker = message as? UUID {
+                if data != nil {
+                    logger?.trace("\(tracker): data for request was ignored")
+                }
+                else if isDone {
+                    logger?.trace("\(tracker): EOF")//EPMD terminated
+                    stop(client: EPMD,trackerID: tracker)
+                }
+                else if error != nil {
+                    logger?.error("\(tracker): error \(error!)")
+                }
             }
-            if isDone {
-                logger?.trace("\(tracker): EOF")//EPMD terminated
-                stop(client: EPMD,trackerID: tracker)
-                return
-            }
+            return
         }
     }
     _ = try
-    spawn(name:EPMDRequest.register_node){(senderPID,message) in
+    spawn(name:EPMDRequest.register_node){(senderPID,ultimatePid) in
         
-        let protocolData = buildRegistrationMessageUsing(name: nodeName, extras: [])
+        let protocolData = buildRegistrationMessageUsing(nodeName: nodeName, port: port.rawValue, extras: [])
         let tracker = UUID()
         NSLog("\(tracker): sending register_node request ")
         connection.send(content: protocolData, completion: NWConnection.SendCompletion.contentProcessed { error in
             guard let error = error else{
                 logger?.trace("\(tracker): sent successfully")
                 
-                "clear_buffer" ! tracker//sending to next process
+                "clear_buffer" ! (tracker,ultimatePid)//sending to next process
                 
                 return
             }
@@ -140,7 +163,7 @@ func spawnProcessesFor(EPMD:EPMD) throws{
     _ = try
     spawn(name:EPMDRequest.port_please){(senderPID,remoteNodeName) in
         
-        let protocolData = buildPortPleaseMessageUsing(nodePid: remoteNodeName as! String)
+        let protocolData = buildPortPleaseMessageUsing(nodeName: remoteNodeName as! String)
         let tracker = UUID()
         logger?.trace("\(tracker): sending port_please request for \(remoteNodeName)")
         connection.send(content: protocolData, completion: NWConnection.SendCompletion.contentProcessed { error in
@@ -256,19 +279,20 @@ func spawnProcessesFor(EPMD:EPMD) throws{
 
 
 
-func buildRegistrationMessageUsing(name:String,extras:[Byte]) -> Data {
+func buildRegistrationMessageUsing(nodeName:String,port:UInt16,extras:[Byte]) -> Data {
     let extrasLength = UInt16(extras.count)
-    let nameBytes = [Byte](name.utf8)
+    let nameBytes = [Byte](nodeName.utf8)
     let nameLength = UInt16(nameBytes.count)
+    let nodePort = port.toMessageByteOrder.toByteArray
     let messageLength = extrasLength + nameLength + 13//13 is the size of all the other components of the message. The 'fixed size' components.
-    let protcolBytes:[EPMDMessageComponent] = [messageLength.toMessageByteOrder.toByteArray,.EPMD_ALIVE2_REQ,.NODE_PORT,.NODE_TYPE,.TCP_IPv4,.HIGHEST_OTP_VERSION,.LOWEST_OTP_VERSION,nameLength.toMessageByteOrder.toByteArray,nameBytes,extrasLength.toMessageByteOrder.toByteArray,extras]
+    let protcolBytes:[EPMDMessageComponent] = [messageLength.toMessageByteOrder.toByteArray,.EPMD_ALIVE2_REQ,nodePort,.NODE_TYPE,.TCP_IPv4,.HIGHEST_OTP_VERSION,.LOWEST_OTP_VERSION,nameLength.toMessageByteOrder.toByteArray,nameBytes,extrasLength.toMessageByteOrder.toByteArray,extras]
     var protocolData = Data(capacity: Int(messageLength))
     protocolData.writeAll(in: protcolBytes)
     return protocolData
 }
 
-func buildPortPleaseMessageUsing(nodePid:String)->Data{
-    let nodePidBytes = [Byte](nodePid.utf8)
+func buildPortPleaseMessageUsing(nodeName:String)->Data{
+    let nodePidBytes = [Byte](nodeName.utf8)
     let nodePidLength = UInt16(nodePidBytes.count)
     let messageLength = nodePidLength + UInt16(EPMDMessageComponent.PORT_PLEASE_REQ.count)
         
@@ -299,17 +323,12 @@ func buildKillMessage()->Data{
 }
 
 
+
+//give this function a default handler.
 @available(macOS 10.14, *)
-func send(client:EPMD, data:Data, trackingID:Any) {
-    logger?.trace("Sending request \(trackingID)")
-    client.connection.send(content: data, completion: NWConnection.SendCompletion.contentProcessed { error in
-        guard let error = error else{
-            logger?.trace("request \(trackingID) sent successfully")
-            return
-        }
-        logger?.error("request \(trackingID) got error \(error) when sending request")
-        stop(client:client,trackerID: trackingID)
-    })
+func start(client:EPMD, handler:@escaping (NWConnection.State)->Void){
+    client.connection.stateUpdateHandler = handler
+    client.connection.start(queue: .global())
 }
 
 ///

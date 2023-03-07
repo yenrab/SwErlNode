@@ -45,6 +45,16 @@ extension UInt16{
     }
 }
 
+
+extension UInt32{
+    var toMessageByteOrder:UInt32{
+        if CFByteOrderGetCurrent() == CFByteOrderLittleEndian.rawValue {
+            return self
+        }
+        return self.bigEndian
+    }
+}
+
 ///
 ///All Erlang inter-node messages use the big-endian
 ///representation for numbers. This function
@@ -71,6 +81,10 @@ extension UInt32{
 ///
 extension UInt16{
     var toByteArray:[Byte]{
+        return withUnsafeBytes(of: self) {
+            Array($0)
+        }
+        /*
         let count = MemoryLayout<UInt16>.size
         var duplicate = self
         let bytePtr = withUnsafePointer(to: &duplicate) {
@@ -79,6 +93,15 @@ extension UInt16{
             }
         }
         return [Byte](bytePtr)
+         */
+    }
+}
+
+extension UInt32 {
+    var toByteArray:[Byte]{
+        return withUnsafeBytes(of: self) {
+            Array($0)
+        }
     }
 }
 
@@ -92,13 +115,14 @@ extension Data {
             (UInt16(self[1]) << (1*8))   // shift 8 bits
     }
 }
+//this extension uses multiplication rather than bit-shifting
+//to give the compiler every chance to maximize optimization.
 extension Data {
     var toUInt32: UInt32 {
-        return
-            (UInt32(self[0]) << (0*8)) | // shift 0 bits
-            (UInt32(self[1]) << (1*8)) | // shift 8 bits
-            (UInt32(self[2]) << (2*8)) | // shift 16 bits
-            (UInt32(self[3]) << (3*8))   // shift 24 bits
+        return UInt32(self[0])            | //<< (0*8)) | // shift 0 bits
+               UInt32(self[1]) * 256      | // << (1*8)) | // shift 8 bits
+               UInt32(self[2]) * 65536    | // << (2*8)) | // shift 16 bits
+               UInt32(self[3]) * 16777216   // << (3*8))   // shift 24 bits
         
     }
 }
@@ -156,11 +180,10 @@ extension EPMDMessageComponent{
     static let EPMD_NON_VARIABLE_SIZE = [Byte(13)]//the size of the non-variable fields as defined at https://www.erlang.org/doc/apps/erts/erl_dist_protocol.html
     static let PORT_PLEASE_REQ = [Byte(122)]
     static let EPMD_ALIVE2_REQ = [Byte(120)]
-    static var NODE_PORT = UInt16(9090).toMessageByteOrder.toByteArray
     static let NODE_TYPE = [Byte(72)]//native type node
     static let TCP_IPv4 = [Byte(0)]
     static let TCP_IPv6 = [Byte(1)]
-    static let HIGHEST_OTP_VERSION = [Byte(6)]
+    static let HIGHEST_OTP_VERSION = UInt16(6).toMessageByteOrder.toByteArray
     static let LOWEST_OTP_VERSION = HIGHEST_OTP_VERSION
 }
 
