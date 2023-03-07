@@ -111,6 +111,7 @@ func spawnProcessesFor(EPMD:EPMD) throws{
             logger?.error("\(tracker): error \(error) send error")
             stop(client:EPMD,trackerID: tracker)
         })
+        NSLog("\(tracker): sent register_node request ")
     }
     
     //

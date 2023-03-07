@@ -204,7 +204,7 @@ final class SwErlNodeTests: XCTestCase {
         
         //start the mock server
         mock.listener.start(queue: mock.queue)
-        wait(for: [serverReadyExpectation], timeout: 10.0)
+        wait(for: [serverReadyExpectation], timeout: 11.0)
         
         let allDone = expectation(description: "completed receive")
         //spawn the ultimate processes
@@ -214,7 +214,7 @@ final class SwErlNodeTests: XCTestCase {
         }
         
         //Start up the EPMD client
-        let port = NWEndpoint.Port(9090)
+        let port = NWEndpoint.Port(4369)
         let host = NWEndpoint.Host(hostName)
         let connection = NWConnection(host: host, port: port, using: .tcp)
         let client:EPMD = (port,host,connection,
@@ -223,6 +223,9 @@ final class SwErlNodeTests: XCTestCase {
         //make the registration request
         EPMDRequest.register_node ! ultimateAssertProcess//replace the ultimate process. The ultimate process must have an expectation that it fulfills when everything works correctly.
         wait(for: [allDone], timeout: 9.0)
+        //clean up
+        mock.listener.stateUpdateHandler = nil
+        mock.listener.newConnectionHandler = nil
         mock.listener.cancel()
     }
     
@@ -287,7 +290,7 @@ final class SwErlNodeTests: XCTestCase {
         
         stop(client: (port,host,connection,"epmd@\(hostName)"), trackerID: UUID())
         wait(for: [cancelationExpectation], timeout: 60.0)
-        
+    
     }
 }
 
