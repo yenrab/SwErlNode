@@ -129,11 +129,6 @@ final class SwErlNodeTests: XCTestCase {
                                .global())
         mock.listener.newConnectionHandler = { newConnection in
             
-            print("Someone tries to talk to us!:", newConnection)
-            
-            //store the connection so it doesn't go out of scope
-            //"connections" ! newConnection
-            
             //
             //start up the mock server listening as if it was an EPMD service
             //
