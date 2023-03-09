@@ -98,7 +98,6 @@ func spawnProcessesFor(EPMD:EPMD) throws{
     spawn(name:EPMDRequest.register_node){(senderPID,ultimatePid) in
         
         let protocolData = buildRegistrationMessageUsing(nodeName: nodeName, port: nodePort, extras: [])
-        print("????\n\(protocolData.count)\n????")
         let tracker = UUID()
         NSLog("\(tracker): sending register_node request ")
         connection.send(content: protocolData, completion: NWConnection.SendCompletion.contentProcessed { error in
@@ -259,7 +258,7 @@ func spawnProcessesFor(EPMD:EPMD) throws{
     // Kill abruptly the EPMD Server. This is almost never used in practice.
     //
     _ = try
-    spawn(name:EPMDRequest.kill){(senderPID,message) in
+    spawn(name:EPMDRequest.kill){(senderPID,ultimatePid) in
         
         let protocolData = buildKillMessage()
         let tracker = UUID()
@@ -268,7 +267,7 @@ func spawnProcessesFor(EPMD:EPMD) throws{
             guard let error = error else{
                 logger?.trace("\(tracker): sent successfully")
                 
-                "clear_buffer" ! tracker//sending to next process
+                "clear_buffer" ! (tracker,ultimatePid)//sending to next process
                 
                 return
             }

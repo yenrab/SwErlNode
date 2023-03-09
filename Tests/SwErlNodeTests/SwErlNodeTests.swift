@@ -200,5 +200,67 @@ final class SwErlNodeTests: XCTestCase {
         mock.listener.newConnectionHandler = nil
         mock.listener.cancel()
     }
+    
+    func testKill() throws{
+        //get the hostname for the testing device
+        let hostName = ProcessInfo.processInfo.hostName
+        
+        //set up a mock server
+        let mock:MockServer = (try NWListener(using: .tcp, on: 4369),
+                               .global())
+        mock.listener.newConnectionHandler = { newConnection in
+            
+            //
+            //start up the mock server listening as if it was an EPMD service
+            //
+            newConnection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _context, isDone, error in
+                if let data = data, !data.isEmpty {
+                    let messageLength = data[0...1].toUInt16.toMachineByteOrder
+                    XCTAssertEqual(messageLength, 1)//first byte of message length
+                    XCTAssertEqual(data[2],107)
+                    
+                    //send response back
+                    var responseData = "ok".data(using: .utf8)
+                    newConnection.send(content: responseData, completion: NWConnection.SendCompletion.contentProcessed { error in
+                        XCTAssertNil(error)
+                    })
+                    return
+                }
+                XCTAssertNil(error)//read error did not happen
+                XCTAssertFalse(isDone)//client did not terminate connection
+            }
+            newConnection.start(queue: .global())//trigger the reading of the incoming data
+        }
+        
+        //start the mock server
+        mock.listener.start(queue: mock.queue)
+        //wait(for: [serverReadyExpectation], timeout: 11.0)
+        
+        
+        
+        //Start up the EPMD client
+        let port = NWEndpoint.Port(4369)
+        let host = NWEndpoint.Host(hostName)
+        let connection = NWConnection(host: host, port: port, using: .tcp)
+        connection.start(queue: DispatchQueue.global())
+        
+        let client = (port,host,connection,"test@\(hostName)",UInt16(9090))//this is the EPMD tuple
+        try spawnProcessesFor(EPMD: client)
+        
+        //spawn the ultimate processes
+        let allDone = expectation(description: "completed receive")
+        let ultimateAssertProcess = try spawn{(pid,message) in
+            let (_,success) = message as! (UUID,String)
+            allDone.fulfill()
+            XCTAssertEqual("ok", success)
+        }
+        //make the registration request
+        EPMDRequest.kill ! ultimateAssertProcess
+        wait(for: [allDone], timeout: 9.0)
+        //clean up
+        mock.listener.stateUpdateHandler = nil
+        mock.listener.newConnectionHandler = nil
+        mock.listener.cancel()
+    }
 }
 
