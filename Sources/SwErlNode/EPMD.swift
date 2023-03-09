@@ -48,11 +48,11 @@ public enum EPMDRequest{
 public typealias EPMD = (EPMDPort:NWEndpoint.Port,
                   EPMD_Host:NWEndpoint.Host,
                   connection:NWConnection,
-                         nodeName:String)
+                         nodeName:String, nodePort:UInt16)
 
 @available(macOS 10.14, *)
 func spawnProcessesFor(EPMD:EPMD) throws{
-    let (port,host,connection,nodeName) = EPMD
+    let (_,host,connection,nodeName,nodePort) = EPMD
     //this process is used to consume responses that
     //contain no needed data
     
@@ -97,7 +97,8 @@ func spawnProcessesFor(EPMD:EPMD) throws{
     _ = try
     spawn(name:EPMDRequest.register_node){(senderPID,ultimatePid) in
         
-        let protocolData = buildRegistrationMessageUsing(nodeName: nodeName, port: port.rawValue, extras: [])
+        let protocolData = buildRegistrationMessageUsing(nodeName: nodeName, port: nodePort, extras: [])
+        print("????\n\(protocolData.count)\n????")
         let tracker = UUID()
         NSLog("\(tracker): sending register_node request ")
         connection.send(content: protocolData, completion: NWConnection.SendCompletion.contentProcessed { error in

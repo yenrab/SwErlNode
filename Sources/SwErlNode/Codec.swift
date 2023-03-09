@@ -110,9 +110,10 @@ extension UInt32 {
 ///
 extension Data {
     var toUInt16: UInt16 {
+        let asBytes = self.bytes
         return
-            (UInt16(self[0]) << (0*8)) | // shift 0 bits
-            (UInt16(self[1]) << (1*8))   // shift 8 bits
+            (UInt16(asBytes[0]) << (0*8)) | // shift 0 bits
+            (UInt16(asBytes[1]) << (1*8))   // shift 8 bits
     }
 }
 //this extension uses multiplication rather than bit-shifting
