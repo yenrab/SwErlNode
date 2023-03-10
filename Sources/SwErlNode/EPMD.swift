@@ -118,7 +118,19 @@ func spawnProcessesFor(EPMD:EPMD) throws{
     //store the port and node information for a named remote node
     //
     _ = try spawn(name:"store_port"){(senderPID,message) in
-        let (tracker,remoteNodeName) = message as! (UUID,String)
+        let tracker:UUID
+        let remoteNodeName:String
+        var ultimatePid:UUID?
+        if let (aTracker,aName,finalPid) = message as? (UUID,String,UUID){
+            tracker = aTracker
+            remoteNodeName = aName
+            ultimatePid = finalPid
+        }
+        else{
+            let (aTracker,aName) = message as! (UUID,String)
+            tracker = aTracker
+            remoteNodeName = aName
+        }
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _context, isDone, error in
             //this code is here for debugging
             //replace it with logging later
@@ -126,10 +138,14 @@ func spawnProcessesFor(EPMD:EPMD) throws{
                 
                 //convert the data to a port number UInt16
                 let responseID = data[0]
-                logger?.trace("\(tracker): response identifier is \(responseID) ?? 119")
+                logger?.trace("\(tracker): response type is \(responseID) ?? 119")
                 if data.count == 2{//error happened
                     let NPMDError = data[1]
                     logger?.error("\(tracker): NPMD error \(NPMDError) for \(remoteNodeName)")
+                    guard let ultimatePid = ultimatePid else{
+                        return
+                    }
+                    ultimatePid ! (tracker,NPMDError)
                     return
                 }
                 
@@ -139,16 +155,26 @@ func spawnProcessesFor(EPMD:EPMD) throws{
                 let highestVersion = data[6...7].toUInt16.toMachineByteOrder
                 let lowestVersion = data[8...9].toUInt16.toMachineByteOrder
                 let nameLength = Int(data[10...11].toUInt16.toMachineByteOrder)
-                let nodeName = String(bytes: data[12...12+nameLength], encoding: .utf8)
-                let extrasLength = Int(data[12+nameLength+1...12+nameLength+1+2].toUInt16.toMachineByteOrder)
-                let extras = data[12+nameLength+1+2+1...12+nameLength+1+2+1+extrasLength]
+                let nameEndIndex = 12+nameLength-1
+                let nodeName = String(bytes: data[12...nameEndIndex], encoding: .utf8)
+                let extrasLength = Int(data[nameEndIndex+1...nameEndIndex+2].toUInt16.toMachineByteOrder)
+                var extras = Data()
+                if extrasLength > 0{
+                    extras = data[nameEndIndex+2...nameEndIndex+2+extrasLength]
+                }
                 logger?.trace("\(tracker): peer info converted")
-                "peerPorts" ! PeerInfo(port: port,nodeType: nodeType,
-                                       msgProtocol:msgProtocol,
-                                       highestVersion: highestVersion,
-                                       lowestVersion: lowestVersion,
-                                       nodeName: nodeName ?? "not_parsable",
-                                       extras: extras)
+                let peerInfo = PeerInfo(port: port,nodeType: nodeType,
+                                        msgProtocol:msgProtocol,
+                                        highestVersion: highestVersion,
+                                        lowestVersion: lowestVersion,
+                                        nodeName: nodeName ?? "not_parsable",
+                                        extras: extras)
+                "peerPorts" ! peerInfo
+                guard let ultimatePid = ultimatePid else{
+                    return
+                }
+                ultimatePid ! (tracker,peerInfo)
+                
             }
             if let error = error {
                 logger?.error("\(tracker): error \(error) for \(remoteNodeName)")
@@ -162,17 +188,28 @@ func spawnProcessesFor(EPMD:EPMD) throws{
         }
     }
     _ = try
-    spawn(name:EPMDRequest.port_please){(senderPID,remoteNodeName) in
+    spawn(name:EPMDRequest.port_please){(senderPID,message) in
+        var finalPid:UUID? = nil
+        let remoteNodeName:String
+        if let (remoteName,ultimatePid) = message as? (String,UUID){
+            finalPid = ultimatePid
+            remoteNodeName = remoteName
+        }
+        else{
+            remoteNodeName = message as! String
+        }
         
-        let protocolData = buildPortPleaseMessageUsing(nodeName: remoteNodeName as! String)
+        let protocolData = buildPortPleaseMessageUsing(nodeName: remoteNodeName)
         let tracker = UUID()
         logger?.trace("\(tracker): sending port_please request for \(remoteNodeName)")
         connection.send(content: protocolData, completion: NWConnection.SendCompletion.contentProcessed { error in
             guard let error = error else{
                 logger?.trace("\(tracker): sent successfully")
-                
-                "store_port" ! (tracker,remoteNodeName)//sending to next process
-                
+                guard let finalPid = finalPid else{
+                    "store_port" ! (tracker,remoteNodeName)//sending to next process
+                    return
+                }
+                "store_port" ! (tracker,remoteNodeName,finalPid)
                 return
             }
             logger?.error("\(tracker): send error \(error) for \(remoteNodeName)")
