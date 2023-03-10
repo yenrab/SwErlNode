@@ -287,7 +287,8 @@ final class SwErlNodeTests: XCTestCase {
                     let extras:[Byte] = []
                     let responseType:[UInt8] = [119]
                     let result:[UInt8] = [0]
-                    let protcolBytes:[EPMDMessageComponent] = [responseType,result,UInt16(9090).toMessageByteOrder.toByteArray,.NODE_TYPE,.TCP_IPv4,.HIGHEST_OTP_VERSION,.LOWEST_OTP_VERSION,nameLength,nameBytes,responseExtrasLength,extras]
+                    let nodeType:[UInt8] = [77]
+                    let protcolBytes:[EPMDMessageComponent] = [responseType,result,UInt16(9090).toMessageByteOrder.toByteArray,nodeType,.TCP_IPv4,.HIGHEST_OTP_VERSION,.LOWEST_OTP_VERSION,nameLength,nameBytes,responseExtrasLength,extras]
                     
                     var responseData = Data()
                     responseData.writeAll(in: protcolBytes)
